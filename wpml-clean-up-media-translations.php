@@ -15,10 +15,10 @@ Copyright (C) 2019 - 2023, Buro voor de Boeg
 
 */
 
-if( file_exists(__DIR__ . '/vendor/autoload.php') ) {
-    require_once __DIR__ . '/vendor/autoload.php';
+if ( file_exists( __DIR__ . '/vendor/autoload.php' ) ) {
+	require_once __DIR__ . '/vendor/autoload.php';
 }
 
 if ( defined( 'WP_CLI' ) && \WP_CLI ) {
-    WP_CLI::add_command( 'bvdb wpml', '\BvdB\WPML\MediaCleanUp\CLI\Command' );
+	WP_CLI::add_command( 'bvdb wpml', '\BvdB\WPML\MediaCleanUp\CLI\Command' );
 }
