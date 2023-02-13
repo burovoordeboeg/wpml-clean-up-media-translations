@@ -219,5 +219,143 @@ class Command extends BaseCommand {
 		return $result;
 	}
 
+
+	// ---- Extra ----
+
+	/**
+	 * Loop all posts with a specific meta key which holds attachment IDs.
+	 * 
+	 * Find twin attachments with the same GUID and delete those, because these were created by WPML.
+	 *
+	 * ## OPTIONS
+	 * 
+	 * [<post-id>...]
+	 * : One or multiple IDs of the post. If no ID is passed, process all attachments.
+	 * 
+	 * --post_type=<post_type>
+	 * : The post type which we are targeting.
+	 * 
+	 * --meta_key=<meta_key>
+	 * : The meta key in which the attachment IDs are stored.
+	 * 
+	 * [--dry-run]
+	 * : If present, no updates will be made.
+	 *
+	 * [--rewind]
+	 * : Resets the cursor so the next time the command is run it will start from the beginning.
+	 * 
+	 * ## EXAMPLES
+	 * 
+	 * 		wp bvdb wpml clean-up-twins-per-meta-key --post_type=portfolio --meta_key=gallery
+	 *
+	 * @subcommand clean-up-twins-per-meta-key
+	 */
+	public function clean_up_twins_per_meta_key( $args, $assoc_args ) {
+
+		$this->start_bulk_operation();
+
+		$bulk_task = new \Alley\WP_Bulk_Task\Bulk_Task(
+		'clean-up-twins-per-meta-key',
+			new \Alley\WP_Bulk_Task\Progress\PHP_CLI_Progress_Bar(
+				__( 'Bulk Task: Remove duplicate post attachments per meta key && guid', 'wpml-fix-command' )
+			)
+		);
+
+		// Always run completly
+		$bulk_task->cursor->reset();
+
+		// Setup query_args from CLI
+		$query_args['post_type'] = $assoc_args['post_type'];
+		$query_args['meta_key'] = $assoc_args['meta_key'];
+
+		// If a post ID is passed, then only process those IDs (and reset the cursor)
+		if ( ! empty( $args ) ) {
+			$query_args['post__in'] = $args;
+		}
+
+		// Set up and run the bulk task.
+		$meta_key = $assoc_args['meta_key'];
+		$dry_run = ! empty( $assoc_args['dry-run'] );
+
+		// Loop in batches
+		$bulk_task->run(
+			$query_args,
+			function( $post ) use ( $dry_run, $meta_key ) {
+
+				if ( $dry_run ) {
+					\WP_CLI::line( 'ID: ' . $post->ID );
+				} else {
+					\WP_CLI::line( 'ID: ' . $post->ID );
+					$this->clean_up_twins_by_guid( $post, $meta_key );
+				}
+
+			}
+		);
+
+		$this->end_bulk_operation();
+	}
+
+	/**
+	 * Check posts if they have post IDs in a custom meta field and then check if those "related" IDs have any twins / duplicates based on it's GUID (filename).
+	 *
+	 */
+	protected function clean_up_twins_by_guid( $post, $meta_key ) {
+
+		// Get meta field value
+		$meta_value = \get_post_meta( $post->ID, $meta_key, true );
+		
+		$meta_value = maybe_unserialize( $meta_value );
+		
+		if( \is_string( $meta_value ) ) {
+			$meta_value = [ $meta_value ];
+		}
+		
+		// If the meta field is empty!
+		if( empty( $meta_value ) ) {
+			return;
+		}
+
+		// Get all guids from the attachments in this meta field
+		$conditions = [
+			'table' => 'wp_posts',
+			'select_column' => 'ID, guid',
+			'where_column' => 'ID',
+			'where_value' => $meta_value
+		];
+
+		$results = $this->select_rows( $conditions );
+
+		// Check if there are attachments with the same `guid`?
+		foreach( $results as $row ) {
+			
+			$conditions = [
+				'table' => 'wp_posts',
+				'select_column' => 'ID',
+				'where_column' => 'guid',
+				'where_value' => [ $row->guid ]
+			];
+			
+			$attachments_with_same_guid = $this->select_rows( $conditions );
+			$attachments_with_same_guid = \wp_list_pluck( $attachments_with_same_guid, 'ID' ); // just use ID's
+
+			if( empty( $attachments_with_same_guid ) ) {
+				continue;
+			}
+
+			// Unset the "original attachment ID" and keep all duplicates. Not that we will always have a key, because because we have at least 1 attachment in the Database ;)
+			$key = \array_search( $row->ID, $attachments_with_same_guid );
+
+			// Just in case... and check for FALSE because $key can be 0 (zero)
+			if( $key !== FALSE ) {
+				unset( $attachments_with_same_guid[ $key ] );	
+			}
+			
+			if( empty( $attachments_with_same_guid ) ) {
+				continue;
+			}
+
+			// Delete the resterende twins
+			$this->delete_twins_related_data( $attachments_with_same_guid );
+		}
 	}
 }
