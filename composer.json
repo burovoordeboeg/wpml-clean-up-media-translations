@@ -1,4 +1,14 @@
 {
+    "name": "burovoordeboeg/wpml-clean-up-media-translations",
+    "description": "Clean up duplicate media entries in the DB after you (accidentally) enabled Media Translations by WPML.",
+    "type": "package",
+    "license": "GPL-3",
+    "authors": [
+        {
+            "name": "jmartinez",
+            "email": "info@burovoordeboeg.nl"
+        }
+    ],
     "autoload": {
         "psr-4": {"BvdB\\WPML\\MediaCleanUp\\": "src/"}
     },
