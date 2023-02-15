@@ -100,7 +100,7 @@ class BaseCommand extends \WP_CLI_Command {
 	protected function reset_actions_log(): void {
 		global $wp_actions;
 
-        $wp_actions = []; //phpcs:ignore
+		$wp_actions = []; //phpcs:ignore
 	}
 
 	/**
@@ -143,5 +143,126 @@ class BaseCommand extends \WP_CLI_Command {
 		if ( is_callable( $wp_object_cache, '__remoteset' ) ) {
 			$wp_object_cache->__remoteset(); // important
 		}
+	}
+
+	 /**
+	 * Loop through all your posts without it making you site crash.
+	 *
+	 * Prevents you from doing a 'posts_per_page' => '-1'.
+	 *
+	 * See: https://docs.wpvip.com/how-tos/write-custom-wp-cli-commands/wp-cli-commands-on-vip/#h-comment-and-provide-verbose-output
+	 *
+	 * @var array $query_args Arguments for WP_Query
+	 * @var callable $callback The function to be called for each Post ID that comes from the WP_Query
+	 * @var array $query_args Arguments to passed to the $callback function
+	 */
+	protected function loop_posts( $query_args = [], $callback = false, $callback_args = []  ) {
+
+		if( ! \is_callable( $callback ) ) {
+			error_log( 'Loop: $callback not callable' );
+			return;
+		}
+
+		// Turn --post__in=1337,187 into an Array
+		$query_args = $this->process_csv_arguments_to_arrays( $query_args );
+
+		// Set base value of these variables that are also being used outside of the while loop
+		$offset = $total = 0;
+
+		do {
+			/**
+			 * Keeps track of the post count because we can't overwrite $query->post_count.
+			 * I used that variable before in the while() check, but now use $count.
+			 */
+			$count = 0;
+
+			$defaults = [
+				'post_type'              => [ 'post' ],
+				'post_status'            => [ 'publish' ],
+				'posts_per_page'         => 500,
+				'paged'                  => 0,
+				'fields'                 => 'ids',
+				'update_post_term_cache' => false, // useful when taxonomy terms will not be utilized.
+				'update_post_meta_cache' => false, // useful when post meta will not be utilized.
+				'ignore_sticky_posts'    => true, // otherwise these will be appened to the query
+				'cache_results'          => false, // in rare situations (possibly WP-CLI commands),
+				'suppress_filters'       => true // don't want a random `pre_get_posts` get in our way
+			];
+
+			$query_args = \wp_parse_args( $query_args, $defaults );
+
+			// Force to false so we can skip SQL_CALC_FOUND_ROWS for performance (no pagination).
+			$query_args['no_found_rows'] = false;
+
+			// When adding 'nopaging' the code breaks... don't know why, haven't investigated it yet.
+			unset( $query_args['nopaging' ] );
+
+			// Base value is 0 (zero) and is upped with the 'posts_per_page' at the end of this function.
+			$query_args['offset'] = $offset;
+
+			// Get them all, you probaly have a pretty good reason to be using these.
+			if( isset( $query_args['p'] ) || isset( $query_args['post__in'] ) || isset( $query_args['post__not_in'] ) ) {
+				$query_args['posts_per_page'] = -1;
+			}
+
+			// Get the posts
+			$query = new \WP_Query( $query_args );
+
+			foreach ( $query->posts as $post ) {
+
+				// Pass the Post and the $callback_args
+				$result = call_user_func_array( $callback, [ $post, $callback_args ] );
+				$count++;
+				$total++;
+			}
+
+			/**
+			 * 'offset' and 'posts_per_page' are being dropped when 'p' or 'post__in' are being used.
+			 * So it will run without a limit and $query->post_count will always be higher then 0 (false) or 0 when it didn't find anything offcourse.
+			 *
+			 * But it is helpfull if you just want to set 1 post ;)
+			 */
+			if( isset( $query_args['p'] ) || isset( $query_args['post__in'] ) || isset( $query_args['post__not_in'] ) ) {
+
+				if ( defined( 'WP_CLI' ) && \WP_CLI ) {
+					\WP_CLI::log( \WP_CLI::colorize('%8Using p, post__in or post__not_in results quering ALL posts, which are not batches by "posts_per_page" and therefor not taking advantage of the goal of this loop.%n') );
+					$count = 0;
+				}
+				
+			}
+
+			//Get a slice of all posts, which result in SQL "LIMIT 0,100", "LIMIT 100, 100", "LIMIT 200, 100" etc. And therefor creating an alternative for $query->have_posts() which can't use because we set 'no_found_rows' to TRUE.
+			$offset = $offset + $query_args['posts_per_page'];
+
+			// Contain memory leaks
+			if ( method_exists( $this, 'clear_caches' ) ) {
+				$this->clear_caches();
+			}
+
+		} while ( $count > 0 );
+
+		if ( defined( 'WP_CLI' ) && \WP_CLI ) {
+			\WP_CLI::line( "{$total} items processed." );
+		}
+		
+	}
+
+	/**
+	 * Transforms arguments with '__' from CSV into expected arrays
+	 *
+	 * Added the check if value is a string, because if it's already an Array, this results in an error.
+	 *
+	 * @param array $assoc_args
+	 * @return array
+	 *
+	 * @props https://github.com/wp-cli/entity-command/blob/master/src/WP_CLI/CommandWithDBObject.php#L99
+	 */
+	protected function process_csv_arguments_to_arrays( $assoc_args ) {
+		foreach ( $assoc_args as $k => $v ) {
+			if ( false !== strpos( $k, '__' ) && is_string( $v ) ) {
+				$assoc_args[ $k ] = explode( ',', $v );
+			}
+		}
+		return $assoc_args;
 	}
 }

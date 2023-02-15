@@ -13,13 +13,6 @@
         "psr-4": {"BvdB\\WPML\\MediaCleanUp\\": "src/"}
     },
     "require": {
-        "php": ">=8.0",
-        "alleyinteractive/wp-bulk-task": "^0.1.2"
-    },
-    "config": {
-        "allow-plugins": {
-            "alleyinteractive/composer-wordpress-autoloader": true,
-            "dealerdirect/phpcodesniffer-composer-installer": true
-        }
+        "php": ">=7.4"
     }
 }

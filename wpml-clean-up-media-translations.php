@@ -2,7 +2,7 @@
 /*
 Plugin Name: BvdB WPML Clean up media translations
 Description: Clean up duplicate media entries in the DB after you (accidentally) enabled Media Translations by WPML.
-Version: 0.1.0
+Version: 0.1.2
 Requires at least: 6.0
 Requires PHP: 7.4
 Author: Buro voor de Boeg

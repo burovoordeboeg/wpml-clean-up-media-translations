@@ -4,6 +4,8 @@ namespace BvdB\WPML\MediaCleanUp\CLI;
 
 class Command extends BaseCommand {
 
+	var $dry_run = false;
+
 	/**
 	 * Loop all attachments and delete duplicates created by WPML
 	 *
@@ -14,9 +16,6 @@ class Command extends BaseCommand {
 	 * 
 	 * [--dry-run]
 	 * : If present, no updates will be made.
-	 *
-	 * [--rewind]
-	 * : Resets the cursor so the next time the command is run it will start from the beginning.
 	 * 
 	 * ## EXAMPLES
 	 * 
@@ -28,39 +27,25 @@ class Command extends BaseCommand {
 
 		$this->start_bulk_operation();
 
-		$bulk_task = new \Alley\WP_Bulk_Task\Bulk_Task(
-			'clean-up-media-twins',
-			new \Alley\WP_Bulk_Task\Progress\PHP_CLI_Progress_Bar(
-				__( 'Bulk Task: Remove duplicate post attachments', 'wpml-fix-command' )
-			)
-		);
-
 		// Set up and run the bulk task.
-		$dry_run = ! empty( $assoc_args['dry-run'] );
+		$this->dry_run = ! empty( $assoc_args['dry-run'] );
 
 		// Setup WP_Query args for this function
 		$query_args['post_status'] = 'inherit';
 		$query_args['post_type']   = 'attachment';
+		$query_args['fields']      = 'all';
 
 		// If a post ID is passed, then only process those IDs (and reset the cursor)
 		if ( ! empty( $args ) ) {
 			$query_args['post__in'] = $args;
-			$bulk_task->cursor->reset();
 		}
 
-		// Loop in batches
-		$bulk_task->run(
-			$query_args,
-			function( $post ) use ( $dry_run ) {
+		$loop = $this->loop_posts( $query_args, function( $post ) {
 
-				if ( $dry_run ) {
-					\WP_CLI::line( 'ID: ' . $post->ID );
-				} else {
-					$this->clean_up_media_twins_by_name_or_title( $post );
-				}
-				
-			}
-		);
+			\WP_CLI::line( 'ID: ' . $post->ID );
+			$this->clean_up_media_twins_by_name_or_title( $post );
+
+		} );
 
 		$this->end_bulk_operation();
 	}
@@ -90,13 +75,22 @@ class Command extends BaseCommand {
 	
 		\WP_CLI::line( "Finding twins of '{$post->post_title}' ({$post->ID})" );
 
+		// post_title
 		$where_claus = $post->post_title . '-%';
 		$twin_ids    = $this->select_twin_ids( 'post_title', $where_claus );
-		$this->delete_twins_related_data( $twin_ids );
 
+		if( ! $this->dry_run ) {
+			$this->delete_twins_related_data( $twin_ids );
+		}
+
+		// post_name
 		$where_claus = $post->post_name . '-%';
 		$twin_ids    = $this->select_twin_ids( 'post_name', $where_claus );
-		$this->delete_twins_related_data( $twin_ids );
+
+		if( ! $this->dry_run ) {
+			$this->delete_twins_related_data( $twin_ids );
+		}
+		
 		
 		return $results;
 	}
@@ -233,9 +227,6 @@ class Command extends BaseCommand {
 	 * 
 	 * [--dry-run]
 	 * : If present, no updates will be made.
-	 *
-	 * [--rewind]
-	 * : Resets the cursor so the next time the command is run it will start from the beginning.
 	 * 
 	 * ## EXAMPLES
 	 * 
@@ -247,41 +238,26 @@ class Command extends BaseCommand {
 
 		$this->start_bulk_operation();
 
-		$bulk_task = new \Alley\WP_Bulk_Task\Bulk_Task(
-			'clean-up-twins-per-meta-key',
-			new \Alley\WP_Bulk_Task\Progress\PHP_CLI_Progress_Bar(
-				__( 'Bulk Task: Remove duplicate post attachments per meta key && guid', 'wpml-fix-command' )
-			)
-		);
-
 		// Setup query_args from CLI
 		$query_args['post_type'] = $assoc_args['post_type'];
 		$query_args['meta_key']  = $assoc_args['meta_key'];
+		$query_args['fields']  	 = 'all';
 
-		// If a post ID is passed, then only process those IDs (and reset the cursor)
+		// If a post ID is passed, then only process those IDs
 		if ( ! empty( $args ) ) {
 			$query_args['post__in'] = $args;
-			$bulk_task->cursor->reset();
 		}
 
 		// Set up and run the bulk task.
 		$meta_key = $assoc_args['meta_key'];
-		$dry_run  = ! empty( $assoc_args['dry-run'] );
+		$this->dry_run = ! empty( $assoc_args['dry-run'] );
 
-		// Loop in batches
-		$bulk_task->run(
-			$query_args,
-			function( $post ) use ( $dry_run, $meta_key ) {
+		$loop = $this->loop_posts( $query_args, function( $post ) use ( $meta_key ) {
 
-				if ( $dry_run ) {
-					\WP_CLI::line( 'ID: ' . $post->ID );
-				} else {
-					\WP_CLI::line( 'ID: ' . $post->ID );
-					$this->clean_up_twins_by_guid( $post, $meta_key );
-				}
+			\WP_CLI::line( 'ID: ' . $post->ID );
+			$this->clean_up_twins_by_guid( $post, $meta_key );
 
-			}
-		);
+		} );
 
 		$this->end_bulk_operation();
 	}
@@ -345,7 +321,9 @@ class Command extends BaseCommand {
 			}
 
 			// Delete the resterende twins
-			$this->delete_twins_related_data( $attachments_with_same_guid );
+			if( ! $this->dry_run ) {
+				$this->delete_twins_related_data( $attachments_with_same_guid );
+			}
 		}
 	}
 }
