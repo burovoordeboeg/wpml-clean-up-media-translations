@@ -35,9 +35,6 @@ class Command extends BaseCommand {
 			)
 		);
 
-		// Always run completly
-		$bulk_task->cursor->reset();
-
 		// Set up and run the bulk task.
 		$dry_run = ! empty( $assoc_args['dry-run'] );
 
@@ -48,6 +45,7 @@ class Command extends BaseCommand {
 		// If a post ID is passed, then only process those IDs (and reset the cursor)
 		if ( ! empty( $args ) ) {
 			$query_args['post__in'] = $args;
+			$bulk_task->cursor->reset();
 		}
 
 		// Loop in batches
@@ -209,11 +207,7 @@ class Command extends BaseCommand {
 
 		$query = "DELETE FROM `$table` WHERE $where;";
 		
-		if ( $this->dry_run ) {
-			\WP_CLI::line( "Dry-run: {$query}" );
-		} else {
-			$result = $wpdb->query( $query );
-		}
+		$result = $wpdb->query( $query );
 		
 		return $result;
 	}
@@ -260,9 +254,6 @@ class Command extends BaseCommand {
 			)
 		);
 
-		// Always run completly
-		$bulk_task->cursor->reset();
-
 		// Setup query_args from CLI
 		$query_args['post_type'] = $assoc_args['post_type'];
 		$query_args['meta_key']  = $assoc_args['meta_key'];
@@ -270,6 +261,7 @@ class Command extends BaseCommand {
 		// If a post ID is passed, then only process those IDs (and reset the cursor)
 		if ( ! empty( $args ) ) {
 			$query_args['post__in'] = $args;
+			$bulk_task->cursor->reset();
 		}
 
 		// Set up and run the bulk task.
