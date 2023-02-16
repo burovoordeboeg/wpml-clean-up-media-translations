@@ -168,6 +168,9 @@ class BaseCommand extends \WP_CLI_Command {
 
 		// Set base value of these variables that are also being used outside of the while loop
 		$offset = $total = 0;
+		if( isset( $query_args['offset'] ) ) {
+			$offset = $query_args['offset'];
+		}
 
 		do {
 			/**
@@ -197,7 +200,7 @@ class BaseCommand extends \WP_CLI_Command {
 			// When adding 'nopaging' the code breaks... don't know why, haven't investigated it yet.
 			unset( $query_args['nopaging' ] );
 
-			// Base value is 0 (zero) and is upped with the 'posts_per_page' at the end of this function.
+			// Value is upped with the 'posts_per_page' at the end of this function.
 			$query_args['offset'] = $offset;
 
 			// Get them all, you probaly have a pretty good reason to be using these.
@@ -232,7 +235,11 @@ class BaseCommand extends \WP_CLI_Command {
 			}
 
 			//Get a slice of all posts, which result in SQL "LIMIT 0,100", "LIMIT 100, 100", "LIMIT 200, 100" etc. And therefor creating an alternative for $query->have_posts() which can't use because we set 'no_found_rows' to TRUE.
+			if ( defined( 'WP_CLI' ) && \WP_CLI ) {
+				\WP_CLI::log( '----- Current offset: ' . $offset . ' ------');
+			}
 			$offset = $offset + $query_args['posts_per_page'];
+			
 
 			// Contain memory leaks
 			if ( method_exists( $this, 'clear_caches' ) ) {
