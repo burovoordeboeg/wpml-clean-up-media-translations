@@ -14,6 +14,9 @@ class Command extends BaseCommand {
 	 * [<attachment-id>...]
 	 * : One ID of the attachment to regenerate. If no ID is passed, process all attachments.
 	 * 
+	 * [--<field>=<value>]
+	 * : Associative args for the new post. See WP_Query.
+	 * 
 	 * [--dry-run]
 	 * : If present, no updates will be made.
 	 * 
@@ -31,9 +34,13 @@ class Command extends BaseCommand {
 		$this->dry_run = ! empty( $assoc_args['dry-run'] );
 
 		// Setup WP_Query args for this function
-		$query_args['post_status'] = 'inherit';
-		$query_args['post_type']   = 'attachment';
-		$query_args['fields']      = 'all';
+		$query_args = array(
+			'post_status' => 'inherit',
+			'post_type' => 'attachment',
+			'fields' => 'all',
+		  );
+		
+		$query_args = wp_parse_args( $assoc_args, $query_args );
 
 		// If a post ID is passed, then only process those IDs (and reset the cursor)
 		if ( ! empty( $args ) ) {
@@ -280,6 +287,9 @@ class Command extends BaseCommand {
 		if ( empty( $meta_value ) ) {
 			return;
 		}
+
+		\WP_CLI::line( 'Meta_value (' . $meta_key . '): ' . implode(',', $meta_value) );
+
 
 		// Get all guids from the attachments in this meta field
 		$conditions = [
