@@ -40,6 +40,7 @@ class Command extends BaseCommand {
 		// DELETE wp_posts
 		$conditions = [
 			'table'        => 'wp_posts',
+			'where_comparison' => '=',
 			'where_column' => 'ID',
 			'where_value'  => $twin_ids,
 		];
@@ -49,6 +50,7 @@ class Command extends BaseCommand {
 		// DELETE wp_icl_translations
 		$conditions = [
 			'table'        => 'wp_icl_translations',
+			'where_comparison' => '=',
 			'where_column' => 'element_id',
 			'where_value'  => $twin_ids,
 		];
@@ -59,6 +61,7 @@ class Command extends BaseCommand {
 		$conditions = [
 			'table'        => 'wp_postmeta',
 			'where_column' => 'post_id',
+			'where_comparison' => '=',
 			'where_value'  => $twin_ids, 
 		];
 
@@ -107,19 +110,16 @@ class Command extends BaseCommand {
 
 		$table        = $conditions['table'];
 		$where_column = $conditions['where_column'];
+		$where_comparison = $conditions['where_comparison'];
 		$where_value  = $conditions['where_value'];
 
-		$where = "`$where_column` LIKE '" . implode( "' OR `$where_column` LIKE '", $where_value ) . "'";
+		$where = "`$where_column` " . $where_comparison . " '" . implode( "' OR `$where_column` " . $where_comparison. " '", $where_value ) . "'";
 
 		$query = "DELETE FROM `$table` WHERE $where;";
-		
 		$result = $wpdb->query( $query );
 		
 		return $result;
 	}
-
-
-	// ---- Extra ----
 
 	/**
 	 * Loop all posts with a specific meta key which holds attachment IDs.
@@ -134,8 +134,8 @@ class Command extends BaseCommand {
 	 * --post_type=<post_type>
 	 * : The post type which we are targeting.
 	 * 
-	 * --meta_key=<meta_key>
-	 * : The meta key in which the attachment IDs are stored.
+	 * [--<field>=<value>]
+	 * : Associative args for the new post. See WP_Query.
 	 * 
 	 * [--dry-run]
 	 * : If present, no updates will be made.
@@ -150,10 +150,13 @@ class Command extends BaseCommand {
 
 		$this->start_bulk_operation();
 
-		// Setup query_args from CLI
-		$query_args['post_type'] = $assoc_args['post_type'];
-		$query_args['meta_key']  = $assoc_args['meta_key'];
-		$query_args['fields']  	 = 'all';
+		// Setup WP_Query args for this function
+		$query_args = array(
+			'post_type' => $assoc_args['post_type'],
+			'fields' => 'all',
+		  );
+		
+		$query_args = wp_parse_args( $assoc_args, $query_args );
 
 		// If a post ID is passed, then only process those IDs
 		if ( ! empty( $args ) ) {
@@ -161,17 +164,71 @@ class Command extends BaseCommand {
 		}
 
 		// Set up and run the bulk task.
-		$meta_key = $assoc_args['meta_key'];
 		$this->dry_run = ! empty( $assoc_args['dry-run'] );
 
-		$loop = $this->loop_posts( $query_args, function( $post ) use ( $meta_key ) {
+		// Keep these post IDs via --meta_values
+		$this->post_ids = ( isset( $query_args['keep_ids'] ) ) ? $query_args['keep_ids'] : [];
+		$this->post_ids = apply_filters( 'bvdb_clean_up_twins_keep_ids', $this->post_ids );
+
+		// Search through these meta values. Beware that if you leave out 1 meta key, a ID in that value could be delete, so always pass ALL meta values.
+		$meta_keys = ( isset( $query_args['keep_keys'] ) ) ? explode( ',', $query_args['keep_keys'] ) : [];
+		$meta_keys = apply_filters( 'bvdb_clean_up_twins_keep_keys', $meta_keys );
+
+		print_r($meta_keys);
+		// Portfolio meta fields
+		$loop = $this->loop_posts( $query_args, function( $post ) use ( $meta_keys ) {
 
 			\WP_CLI::line( 'ID: ' . $post->ID );
-			$this->clean_up_twins_by_guid( $post, $meta_key );
 
+			foreach( $meta_keys as $meta_key ) {
+				$this->post_ids = array_merge( $this->post_ids, $this->get_meta_values( $post, $meta_key ) );
+			}
 		} );
 
+		$this->post_ids = array_unique( $this->post_ids ); // Ontdubbelen
+		$this->post_ids = array_filter( $this->post_ids ); // Lege eruit halen
+
+		// Prepare SQL en juist NIET de post id's selecteren welke we willen behouden
+		$query = "SELECT ID FROM `wp_posts` WHERE ID NOT IN (" . implode( ',', $this->post_ids ) . ") AND `post_type` = 'attachment'";
+
+		// Get data from Database
+		global $wpdb;
+		$not_used_ids = $wpdb->get_results( $query ); // query
+		$not_used_ids = \wp_list_pluck( $not_used_ids, 'ID' ); // just use ID's
+
+		// Can't be deleting ALL items at once, in our case 133.000 items at once...
+		$ppp = ( isset( $query_args['post_per_page'] ) ) ? $query_args['post_per_page'] : 500;
+		$looping_times = count( $not_used_ids ) / $ppp;
+		$looping_times = ceil( $looping_times );
+
+		\WP_CLI::log( count( $this->post_ids ) . ' / ' . count( $not_used_ids ) . ' / ' . $ppp . ' / ' . $looping_times);
+
+		for ( $i = 0; $i < $looping_times ; $i++ ) { 
+			$slice = array_slice( $not_used_ids, $i * $ppp, $ppp );
+			$this->delete_twins_related_data( $slice );
+		}
+
 		$this->end_bulk_operation();
+	}
+
+	protected function get_meta_values( $post, $meta_key ) {
+		// Get meta field value
+		$meta_value = \get_post_meta( $post->ID, $meta_key, true );
+		
+		$meta_value = maybe_unserialize( $meta_value );
+		
+		if ( ! \is_array( $meta_value ) ) {
+			$meta_value = [ $meta_value ];
+		}
+		
+		// If the meta field is empty!
+		if ( empty( $meta_value ) ) {
+			return [];
+		}
+
+		// \WP_CLI::line( 'Meta_value (' . $meta_key . '): ' . implode(',', $meta_value) );
+
+		return $meta_value;
 	}
 
 	/**
