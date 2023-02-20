@@ -164,31 +164,6 @@ class Command extends BaseCommand {
 		}
 	}
 
-
-	/**
-	 * Select rows via SQL Query
-	 */
-	protected function select_rows( array $conditions ) {
-
-		global $wpdb;
-
-		$table        = $conditions['table']; // string
-		$column       = $conditions['select_column']; // string
-		$where_column = $conditions['where_column']; // string
-		$where_value  = $conditions['where_value']; // array
-		
-		// Prepare values
-		$where = "`$where_column` LIKE '" . implode( "' OR `$where_column` LIKE '", $where_value ) . "'";
-
-		// Prepare SQL
-		$query = "SELECT $column FROM `$table` WHERE $where;";
-
-		// Get data from DB
-		$result = $wpdb->get_results( $query );
-
-		return $result;
-	}
-
 	/**
 	 * Delete a row via SQL Query
 	 */
