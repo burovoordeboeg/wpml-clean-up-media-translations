@@ -33,6 +33,8 @@ class Command extends BaseCommand {
 	 */
 	public function clean_up_twins_per_meta_key( $args, $assoc_args ) {
 
+		global $wpdb;
+
 		$this->start_bulk_operation();
 
 		// Setup WP_Query args for this function
@@ -51,45 +53,48 @@ class Command extends BaseCommand {
 		// Set up and run the bulk task.
 		$this->dry_run = ! empty( $assoc_args['dry-run'] );
 
-		// Keep these post IDs via --meta_values
-		$this->post_ids = ( isset( $query_args['keep_ids'] ) ) ? $query_args['keep_ids'] : [];
-		$this->post_ids = apply_filters( 'bvdb_clean_up_twins_keep_ids', $this->post_ids );
+		// Data: Keep these post IDs via --meta_values or filter
+		$this->keep_ids = ( isset( $query_args['keep_ids'] ) ) ? $query_args['keep_ids'] : [];
+		$this->keep_ids = apply_filters( 'wpml_clean_up_media_translations_keep_ids', $this->keep_ids );
 
-		// Search through these meta values. Beware that if you leave out 1 meta key, a ID in that value could be delete, so always pass ALL meta values.
+		// Data: Search through these meta values. Beware that if you leave out 1 meta key, a ID in that value could be delete, so always pass ALL meta values. Via --keep_keys or filter.
 		$meta_keys = ( isset( $query_args['keep_keys'] ) ) ? explode( ',', $query_args['keep_keys'] ) : [];
-		$meta_keys = apply_filters( 'bvdb_clean_up_twins_keep_keys', $meta_keys );
+		$meta_keys = apply_filters( 'wpml_clean_up_media_translations_keep_keys', $meta_keys );
 
-		print_r($meta_keys);
-		// Portfolio meta fields
-		$loop = $this->loop_posts( $query_args, function( $post ) use ( $meta_keys ) {
+		// Loop: Get all meta keys values
+		$this->loop_posts( $query_args, function( $post ) use ( $meta_keys ) {
 
 			\WP_CLI::line( 'ID: ' . $post->ID );
 
 			foreach( $meta_keys as $meta_key ) {
-				$this->post_ids = array_merge( $this->post_ids, $this->get_meta_value( $post, $meta_key ) );
+				$this->keep_ids = array_merge( $this->keep_ids, $this->get_meta_value( $post, $meta_key ) );
 			}
 		} );
 
-		$this->post_ids = array_unique( $this->post_ids ); // Ontdubbelen
-		$this->post_ids = array_filter( $this->post_ids ); // Lege eruit halen
+		$this->keep_ids = array_unique( $this->keep_ids ); // Ontdubbelen
+		$this->keep_ids = array_filter( $this->keep_ids ); // Lege eruit halen
+
+		if( empty( $this->keep_ids ) ) {
+			\WP_CLI::line( 'Nothing to clean');
+			return;
+		}
 
 		// Prepare SQL en juist NIET de post id's selecteren welke we willen behouden
-		$query = "SELECT ID FROM `wp_posts` WHERE ID NOT IN (" . implode( ',', $this->post_ids ) . ") AND `post_type` = 'attachment'";
+		$query = "SELECT ID FROM `" . $wpdb->prefix . "posts` WHERE ID NOT IN (" . implode( ',', $this->keep_ids ) . ") AND `post_type` = 'attachment'";
 
 		// Get data from Database
-		global $wpdb;
 		$not_used_ids = $wpdb->get_results( $query ); // query
 		$not_used_ids = \wp_list_pluck( $not_used_ids, 'ID' ); // just use ID's
 
 		// Can't be deleting ALL items at once, in our case 133.000 items at once...
-		$ppp = ( isset( $query_args['post_per_page'] ) ) ? $query_args['post_per_page'] : 500;
-		$looping_times = count( $not_used_ids ) / $ppp;
+		$post_per_page = ( isset( $query_args['post_per_page'] ) ) ? $query_args['post_per_page'] : 500;
+		$looping_times = count( $not_used_ids ) / $post_per_page;
 		$looping_times = ceil( $looping_times );
 
-		\WP_CLI::log( count( $this->post_ids ) . ' / ' . count( $not_used_ids ) . ' / ' . $ppp . ' / ' . $looping_times);
+		\WP_CLI::log( count( $this->keep_ids ) . ' / ' . count( $not_used_ids ) . ' / ' . $post_per_page . ' / ' . $looping_times);
 
 		for ( $i = 0; $i < $looping_times ; $i++ ) { 
-			$slice = array_slice( $not_used_ids, $i * $ppp, $ppp );
+			$slice = array_slice( $not_used_ids, $i * $post_per_page, $post_per_page );
 			$this->delete_twins_related_data( $slice );
 		}
 
@@ -126,35 +131,37 @@ class Command extends BaseCommand {
 	 */
 	protected function delete_twins_related_data( array $twin_ids ) {
 
+		global $wpdb;
+
 		// DELETE wp_posts
 		$conditions = [
-			'table'        => 'wp_posts',
+			'table'        => $wpdb->prefix . 'posts',
 			'where_comparison' => '=',
 			'where_column' => 'ID',
 			'where_value'  => $twin_ids,
 		];
 
-		$results['wp_posts'] = $this->delete_row( $conditions );
+		$results[ $wpdb->prefix . 'posts'] = $this->delete_row( $conditions );
 		
 		// DELETE wp_icl_translations
 		$conditions = [
-			'table'        => 'wp_icl_translations',
+			'table'        => $wpdb->prefix . 'icl_translations',
 			'where_comparison' => '=',
 			'where_column' => 'element_id',
 			'where_value'  => $twin_ids,
 		];
 
-		$results['wp_icl_translations'] = $this->delete_row( $conditions );
+		$results[ $wpdb->prefix . 'icl_translations'] = $this->delete_row( $conditions );
 
 		// DELETE wp_postmeta
 		$conditions = [
-			'table'        => 'wp_postmeta',
+			'table'        => $wpdb->prefix . 'postmeta',
 			'where_column' => 'post_id',
 			'where_comparison' => '=',
 			'where_value'  => $twin_ids, 
 		];
 
-		$results['wp_postmeta'] = $this->delete_row( $conditions );
+		$results[ $wpdb->prefix .  'postmeta' ] = $this->delete_row( $conditions );
 
 		if ( ! empty( $twin_ids ) ) {
 			\WP_CLI::line( 'Purged attachments: ' . implode( ', ', $twin_ids ) );

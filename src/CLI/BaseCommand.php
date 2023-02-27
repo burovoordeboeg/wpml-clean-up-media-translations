@@ -182,7 +182,7 @@ class BaseCommand extends \WP_CLI_Command {
 			$defaults = [
 				'post_type'              => [ 'post' ],
 				'post_status'            => [ 'publish' ],
-				'posts_per_page'         => 500,
+				'posts_per_page'         => 10,
 				'paged'                  => 0,
 				'fields'                 => 'ids',
 				'update_post_term_cache' => false, // useful when taxonomy terms will not be utilized.
@@ -236,7 +236,7 @@ class BaseCommand extends \WP_CLI_Command {
 
 			//Get a slice of all posts, which result in SQL "LIMIT 0,100", "LIMIT 100, 100", "LIMIT 200, 100" etc. And therefor creating an alternative for $query->have_posts() which can't use because we set 'no_found_rows' to TRUE.
 			if ( defined( 'WP_CLI' ) && \WP_CLI ) {
-				\WP_CLI::log( '----- Current offset: ' . $offset . ' ------');
+				\WP_CLI::warning( '----- Current offset: ' . $offset . ' ------');
 			}
 			$offset = $offset + $query_args['posts_per_page'];
 			
